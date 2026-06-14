@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ipamd-attribution-exporter
+  namespace: monitoring
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<irsa-role-name>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ipamd-attribution-exporter
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ipamd-attribution-exporter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ipamd-attribution-exporter
+subjects:
+  - kind: ServiceAccount
+    name: ipamd-attribution-exporter
+    namespace: monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipamd-attribution-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ipamd-attribution-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ipamd-attribution-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ipamd-attribution-exporter
+    spec:
+      serviceAccountName: ipamd-attribution-exporter
+      containers:
+        - name: exporter
+          image: <account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/ipamd-attribution-exporter:<tag>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: CLUSTER_NAME
+              value: production
+            - name: VPC_ID
+              value: vpc-xxxxxxxx
+            - name: AWS_REGION
+              value: ap-southeast-1
+            - name: RECONCILE_INTERVAL
+              value: 60s
+            - name: STALE_THRESHOLD
+              value: 180s
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ipamd-attribution-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ipamd-attribution-exporter
+spec:
+  selector:
+    app.kubernetes.io/name: ipamd-attribution-exporter
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ipamd-attribution-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ipamd-attribution-exporter
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ipamd-attribution-exporter
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 30s
